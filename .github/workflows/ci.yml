@@ -1,0 +1,52 @@
+name: CI/CD Pipeline‑Prometheus
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push Prometheus image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        tags: ${{ secrets.DOCKER_USERNAME }}/myprometheus:latest
+
+    - name: Scan image for vulnerabilities
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ secrets.DOCKER_USERNAME }}/myprometheus:latest
+        format: table
+        severity: CRITICAL,HIGH
+        vuln-type: os,library
+
+    - name: Deploy to EC2 via SSH
+      uses: appleboy/ssh-action@v1.2.1
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }} # verify host key :contentReference[oaicite:1]{index=1}
+        script_stop: true # stop on first error :contentReference[oaicite:2]{index=2}
+        script: |
+          docker pull ${{ secrets.DOCKER_USERNAME }}/myprometheus:latest
+          docker stop myprometheus || true
+          docker rm myprometheus || true
+          docker run -d --name myprometheus -p 9090:9090 ${{ secrets.DOCKER_USERNAME }}/myprometheus:latest
+
